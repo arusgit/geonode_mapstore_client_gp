@@ -1,0 +1,79 @@
+# Simple workflow for deploying static content to GitHub Pages
+name: Deploy static content to Pages
+
+on:
+  # Runs on pushes targeting the default branch
+  push:
+    branches: ["master"]
+
+  # Allows you to run this workflow manually from the Actions tab
+  workflow_dispatch:
+
+# Sets permissions of the GITHUB_TOKEN to allow deployment to GitHub Pages
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+# Allow one concurrent deployment
+concurrency:
+  group: "pages"
+  cancel-in-progress: true
+
+jobs:
+  # Single deploy job since we're just deploying
+  deploy:
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout master
+        uses: actions/checkout@v3
+        with:
+           ref: master
+      ############
+      # CACHING
+      ##########
+      - name: "cache node modules"
+        uses: actions/cache@v1
+        env:
+          cache-name: cache-node-modules
+        with:
+          path: ~/.npm # npm cache files are stored in `~/.npm` on Linux/macOS
+          key: ${{ runner.os }}-build-${{ env.cache-name }}-${{ hashFiles('**/package.json') }}
+          restore-keys: |
+            ${{ runner.os }}-build-${{ env.cache-name }}-
+            ${{ runner.os }}-build-
+            ${{ runner.os }}-
+      - name: Install build dependencies
+        run: |
+          mkdir ../gh-pages
+          npm install jsdoc@4.0.0 -g
+          npm install @jsdoc/salty@0.2.1 -g
+      - name: Build master documentation
+        run: |
+          cd ./geonode_mapstore_client/client/
+          npm run docs
+          cd ../../
+          mv ./docs ../gh-pages/master
+      - name: Checkout 4.1.x
+        uses: actions/checkout@v3
+        with:
+           ref: 4.1.x
+      - name: Build 4.1.x documentation
+        run: |
+          cd ./geonode_mapstore_client/client/
+          npm run docs
+          cd ../../
+          mv ./docs ../gh-pages/4.1.x
+      - name: Setup Pages
+        uses: actions/configure-pages@v2
+      - name: Upload artifact
+        uses: actions/upload-pages-artifact@v1
+        with:
+          # Upload entire repository
+          path: '../gh-pages'
+      - name: Deploy to GitHub Pages
+        id: deployment
+        uses: actions/deploy-pages@v1

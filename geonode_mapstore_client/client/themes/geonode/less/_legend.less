@@ -1,0 +1,28 @@
+// **************
+// Theme
+// **************
+
+#gn-components-theme(@theme-vars) {
+    .gn-legend-wrapper {
+        .color-var(@theme-vars[main-color]);
+        .background-color-var(@theme-vars[main-bg]);
+    }
+}
+
+// **************
+// Layout
+// **************
+
+.gn-legend-wrapper {
+    .ms-layers-tree {
+        padding-top: 0;
+        &.legend-tree {
+            .ms-node-layer {
+                ul {
+                    max-height: 500px;
+                    overflow: auto;
+                }
+            }
+        }
+    }
+}
