@@ -38,7 +38,7 @@ import turfBbox from '@turf/bbox';
 import { getProjection } from './ProjectionUtils';
 
 let CoordinatesUtils;
-
+proj4.defs("EPSG:32633", "+proj=utm +zone=33 +datum=WGS84 +units=m +no_defs");
 export const FORMULAS = {
     /**
     @param coordinates in EPSG:4326
