@@ -11,14 +11,26 @@ import * as Cesium from 'cesium';
 import GeoServerBILTerrainProvider from '../../../../utils/cesium/GeoServerBILTerrainProvider';
 import { isEqual } from 'lodash';
 import WMSUtils from '../../../../utils/cesium/WMSUtils';
-import CoordinatesUtils from '../../../../utils/CoordinatesUtils';
 import {roundRangeResolution,getStartEndDomainValues,domainsToDimensionsObject} from '../../../../utils/TimeUtils'
 import MultiDim from '../../../../api/MultiDim';
 import  'rxjs/add/operator/first';
 import  'rxjs/add/operator/switchMap';
 import {reprojectBbox} from '../../../../utils/CoordinatesUtils';
-import { pipe } from 'lodash/fp';
 const Bboxlayers= new Map();
+
+/*
+function to manage interval like 2016-02-23T03:00:00.000Z/2016-02-23T06:00:00.000Z,2016-02-23T06:00:00.000Z/2016-02-23T12:00:00.000Z 
+if you specify End attibute in layer with time dimesion
+*/
+const extractValuesBeforeSlash = (inputString) => {
+    // Split the string by commas to get each interval
+    const intervals = inputString.split(',');
+
+    // Map through each interval and split by '/' to extract the value before '/'
+    const valuesBeforeSlash = intervals.map(interval => interval.split('/')[0]);
+
+    return valuesBeforeSlash;
+};
 const createLayer =  async (options,map) => {
     let layer;
    
@@ -111,13 +123,19 @@ const createLayer =  async (options,map) => {
         const clockViewModel = new Cesium.ClockViewModel(clock);
         const viewModel = new Cesium.AnimationViewModel(clockViewModel);
         let domainValues;
-        if ( domain.Domain){
-             domainValues = domain.Domain && domain.Domain.indexOf('--') < 0 && domain.Domain.split(',');
+        if ( domain.Domain && domain.Domain.indexOf('--') < 0){
+            domainValues  = extractValuesBeforeSlash(domain.Domain);
+           //  domainValues = domain.Domain && domain.Domain.indexOf('--') < 0
+             
         } else {
-            domainValues = domain.domain && domain.domain.indexOf('--') < 0 && domain.domain.split(',');
+            if (domain.Domain && domain.Domain.indexOf('--') < 0){
+                 domainValues  = extractValuesBeforeSlash(domain.domain);
+            }
         } 
+        
         var times;
         if (domainValues.length>0){
+             
              times= new Cesium.TimeIntervalCollection.fromIso8601DateArray({
                 iso8601Dates :domainValues,
                 leadingInterval: true,
@@ -126,6 +144,7 @@ const createLayer =  async (options,map) => {
                 dataCallback: dataCallback,
             });
         } else {
+            
             const {range, resolution} = roundRangeResolution(initialRange,20);
             times = Cesium.TimeIntervalCollection.fromIso8601({
             iso8601: range.start.toISOString()+"/"+range.end.toISOString()+"/"+resolution,
