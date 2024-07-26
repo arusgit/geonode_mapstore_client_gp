@@ -142,6 +142,19 @@ class CesiumLayer extends React.Component {
                     if (el.id.includes(this.props.options.id))
                         el.remove()
                 });
+                const hasTimeDimension = this.props.map.imageryLayers._layers.some(layer => layer._imageryProvider._timeDynamicImagery);
+                if (!hasTimeDimension){
+                    //document.getElementById("timelineContainer").forEach(element => element.remove());
+                    //document.getElementById("animationContainer").forEach(element => element.remove());
+                    const element = document.getElementById("timelineContainer");
+                    if (element) {
+                      element.remove();
+                     }
+                     const element2 = document.getElementById("animationContainer");
+                    if (element2) {
+                      element2.remove();
+                     }
+                }
             }
             if (this.refreshTimer) {
                 clearInterval(this.refreshTimer);

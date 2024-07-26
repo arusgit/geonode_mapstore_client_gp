@@ -155,7 +155,7 @@ const createLayer =  async (options,map) => {
             }); 
         }
          //create Timeline Widget
-         createTimeLineWidget(clock,map,domainValues && domainValues.length>0 ? domainValues:times_intervals.map(item => item.data.Time));
+         createTimeLineWidget(clock,map,domainValues && domainValues.length>0 ? domainValues:times._intervals.map(item => item.data.Time));
          //create Animation Widget 
          createAnimationWidget(viewModel,map);
         // Ensure the scene re-renders on each tick
