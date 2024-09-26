@@ -429,7 +429,7 @@ function addCustomBookmarks(timelineContainer,julianDates,clock,id,map,timeline)
 
     function updateBookmarks() {
         const totalDuration = Cesium.JulianDate.secondsDifference(clock.stopTime, clock.startTime);
-        console.log('Updating bookmarks. Total Duration:', totalDuration);
+        //console.log('Updating bookmarks. Total Duration:', totalDuration);
         bookmarks.forEach(bookmark => {
             const tickPosition = calculateBookmarkPosition(bookmark.julianDate, timeline);
             bookmark.element.style.left = `${tickPosition}px`;
