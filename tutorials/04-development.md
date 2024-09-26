@@ -52,7 +52,8 @@ DEV_TARGET_GEONODE_HOST=localhost:8000
 ```
 
 - install all package dependencies with the command
-
+for WINDOWS SET NODE_OPTIONS="--openssl-legacy-provider"
+for linux ENV NODE_OPTIONS="--openssl-legacy-provider"
 ```
 npm install
 ```
@@ -97,7 +98,8 @@ DEV_TARGET_GEONODE_HOST=mygeonodeinstance.org
 ```
 
 - install all package dependencies with the command
-
+for WINDOWS SET NODE_OPTIONS="--openssl-legacy-provider"
+for linux ENV NODE_OPTIONS="--openssl-legacy-provider"
 ```
 npm install
 ```
