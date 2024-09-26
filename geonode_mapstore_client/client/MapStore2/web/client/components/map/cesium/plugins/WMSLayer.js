@@ -205,7 +205,7 @@ const createLayer =  async (options,map) => {
             timelineContainer.style.left = '340px';
             //timelineContainer.className='timeline-plugin';
             // Set the width of the timeline container to 80% of the Cesium container width
-            timelineContainer.style.width = cesiumContainerWidth * 0.77 + "px";
+            timelineContainer.style.width = cesiumContainerWidth * 0.71 + "px";
 
             timelineContainer.style.height = '50px';
             document.getElementsByClassName(map.cesiumWidget.container.className)[0].appendChild(timelineContainer);
@@ -221,7 +221,7 @@ const createLayer =  async (options,map) => {
       
        
        
-        addCustomBookmarks(timelineContainer,julianDates,clock,options.id,map);
+        addCustomBookmarks(timelineContainer,julianDates,clock,options.id,map,timeline);
        
         timeline.zoomTo(clock.startTime, clock.stopTime);
         timeline.updateFromClock();
@@ -275,7 +275,7 @@ const updateLayer = (layer, newOptions, oldOptions,map) => {
                 setVisibilityTimeLine('visible',layer);
                 const TimeintervalsjulianDates = layer._timeDynamicImagery._times._intervals;
                 const julianDates = buildJulianDates(TimeintervalsjulianDates);
-                addCustomBookmarks(timelineContainer,julianDates,map.clock,newOptions.id,map)
+                addCustomBookmarks(timelineContainer,julianDates,map.clock,newOptions.id,map,timeline)
             } 
         } else {
             /* Start Business logic to hidden o remove timeline */
@@ -371,8 +371,8 @@ function dataCallback(interval, index) {
    
 }
 
-function addCustomBookmarks(timelineContainer,julianDates,clock,id,map) {
-   
+function addCustomBookmarks(timelineContainer,julianDates,clock,id,map,timeline) {
+   var bookmarks = []; // Store bookmark elements for later updates
    var i=0;
    julianDates.forEach(julianDate => {
        const gregorianDate = Cesium.JulianDate.toDate(julianDate);
@@ -410,9 +410,39 @@ function addCustomBookmarks(timelineContainer,julianDates,clock,id,map) {
        
 
        timelineContainer.appendChild(bookmarkElement);
+       bookmarks.push({ element: bookmarkElement, julianDate: julianDate }); // Store the bookmark and its Julian date
        i++;
     });
     
+    function calculateBookmarkPosition(julianDate, timeline) {
+        // Get the current visible start and end times of the timeline
+        const startTime = timeline._startJulian; // Start time in JulianDate
+        const stopTime = timeline._endJulian;   // End time in JulianDate
+
+        const totalVisibleDuration = Cesium.JulianDate.secondsDifference(stopTime, startTime);
+        const timeOffset = Cesium.JulianDate.secondsDifference(julianDate, startTime);
+
+        // Calculate the position relative to the timeline width
+        const tickPosition = (timeOffset / totalVisibleDuration) * timelineContainer.clientWidth;
+        return tickPosition;
+    }
+
+    function updateBookmarks() {
+        const totalDuration = Cesium.JulianDate.secondsDifference(clock.stopTime, clock.startTime);
+        console.log('Updating bookmarks. Total Duration:', totalDuration);
+        bookmarks.forEach(bookmark => {
+            const tickPosition = calculateBookmarkPosition(bookmark.julianDate, timeline);
+            bookmark.element.style.left = `${tickPosition}px`;
+            bookmark.element.offsetWidth; // Force DOM reflow
+        });
+
+        // Request a re-render of the Cesium scene (if necessary)
+        map.scene.requestRender();
+    }
+    timelineContainer.addEventListener('wheel', function(event) {
+       
+        setTimeout(updateBookmarks, 100); // Delay to allow timeline to finish zooming
+    });
     
 }
   
