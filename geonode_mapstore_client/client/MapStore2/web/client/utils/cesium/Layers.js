@@ -17,7 +17,7 @@ const Layers = {
     createLayer: async function(type, options, map) {
         var layerCreator = layerTypes[type];
         if (layerCreator && layerCreator.create) {
-            const l= await layerCreator.create(options, map);
+            const l = await layerCreator.create(options, map);
             return l;
         } else if (layerCreator) {
             // TODO this compatibility workaround should be removed

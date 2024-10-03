@@ -10,14 +10,21 @@ import Layers from '../../../../utils/cesium/Layers';
 import * as Cesium from 'cesium';
 import GeoServerBILTerrainProvider from '../../../../utils/cesium/GeoServerBILTerrainProvider';
 import { isEqual } from 'lodash';
-import WMSUtils from '../../../../utils/cesium/WMSUtils';
-import {roundRangeResolution,getStartEndDomainValues,domainsToDimensionsObject} from '../../../../utils/TimeUtils'
+import WMSUtils, { wmsToCesiumOptions } from '../../../../utils/cesium/WMSUtils';
+import {roundRangeResolution, getStartEndDomainValues, domainsToDimensionsObject} from '../../../../utils/TimeUtils'
 import MultiDim from '../../../../api/MultiDim';
 import  'rxjs/add/operator/first';
 import  'rxjs/add/operator/switchMap';
 import {reprojectBbox} from '../../../../utils/CoordinatesUtils';
-const Bboxlayers= new Map();
-
+const Bboxlayers = new Map();
+var bookmarks = []; // Store bookmark elements for later updates
+var timeline; // timeline in timelinecontainer
+var wheelHandler;
+var cloneclock;
+const selectedlayerKey = 'selectedlayer';
+const selectedDateKey = 'selectedDate';
+const storageKey = 'layerDates';
+let layerDates = [];
 /*
 function to manage interval like 2016-02-23T03:00:00.000Z/2016-02-23T06:00:00.000Z,2016-02-23T06:00:00.000Z/2016-02-23T12:00:00.000Z 
 if you specify End attibute in layer with time dimesion
@@ -31,37 +38,45 @@ const extractValuesBeforeSlash = (inputString) => {
 
     return valuesBeforeSlash;
 };
-const createLayer =  async (options,map) => {
+
+const createLayer = async (options,map) => {
     let layer;
    
+    var  hasTimeDimension = false;
     if (options.useForElevation) {
         return new GeoServerBILTerrainProvider(WMSUtils.wmsToCesiumOptionsBIL(options));
     }
+    if ( options.dimensions && options.dimensions !== null && options.dimensions.length > 0) {
+        hasTimeDimension = options.dimensions.some(dim => dim.name === "time");
+        if (!hasTimeDimension){
+            removeDropdownContainer();
+        }
+    }
+    
     if (options.singleTile) {
-        layer = new Cesium.SingleTileImageryProvider(WMSUtils.wmsToCesiumOptionsSingleTile(options));
-    } else {
-        var  hasTimeDimension = false;
-        if (options.group!=='background'){
-            if (options.dimensions!=null && options.dimensions.length>0){
+        
+        if (map._cesiumWidget._scene._defaultView.camera._mode === Cesium.SceneMode.SCENE3D) {
+            // reset timeline an remove bookmark
+           
+            if (options.dimensions !== undefined  && options.dimensions.length > 0) {
                 hasTimeDimension = options.dimensions.some(dim => dim.name === "time");
                 if (!hasTimeDimension){
-                    layer = new Cesium.WebMapServiceImageryProvider(WMSUtils.wmsToCesiumOptions(options));
-                }else {
-                
-                    return await getLayerFromObservable();
-            
+                    const newCesiumOptions = setSingleTileParameters(options);
+                    layer = new Cesium.WebMapServiceImageryProvider( WMSUtils.wmsToCesiumOptions(newCesiumOptions));
+                } else {
+                  
+                   return await getLayerFromObservable();          
                 }
             } else {
-                // potrebbe essere che sto aggiungendo il layer nella scena 3d quindi faccio una request per sapere
-                // se il layer contiene la dimensione time in quanto options.dimension è null
-                return  new Promise((resolve,reject) => { MultiDim.describeDomains(MultiDim.getMultidimURL(options), options.name)
+                return  new Promise((resolve,reject) => { 
+                    MultiDim.describeDomains(MultiDim.getMultidimURL(options), options.name)
                     .switchMap( domains => {
-                        const dimensions = domainsToDimensionsObject(domains,MultiDim.getMultidimURL(options)) || [];
+                        const dimensions = domainsToDimensionsObject(domains , MultiDim.getMultidimURL(options)) || [];
                         if (dimensions && dimensions.length > 0) {
-                            hasTimeDimension = dimensions.some( dim => dim.name==="time")
+                            hasTimeDimension = dimensions.some( dim => dim.name === "time")
                             if (hasTimeDimension){
-                                const result =dimensions.filter( dim => dim.name==="time");
-                                const space = dimensions.filter( dim => dim.name==="space");
+                                const result =dimensions.filter( dim => dim.name === "time");
+                                const space = dimensions.filter( dim => dim.name === "space");
                                 if (result && result.length){
                                     const dataRange = getStartEndDomainValues(result[0].domain);
                                     const layer = setInitDataLayer(dataRange,map,result[0]);
@@ -69,11 +84,73 @@ const createLayer =  async (options,map) => {
                                     resolve(layer);
                                 }
                             } else {
-                                layer = new Cesium.WebMapServiceImageryProvider(WMSUtils.wmsToCesiumOptions(options));
+                                if (!options.singleTile){
+                                    layer = new Cesium.WebMapServiceImageryProvider(WMSUtils.wmsToCesiumOptions(options));
+                                } else {
+                                    layer = buildSingleTileLayer(options);
+                                }
                                 resolve(layer);
                             }
                         } else {
-                            layer = new Cesium.WebMapServiceImageryProvider(WMSUtils.wmsToCesiumOptions(options));
+                            if (!options.singleTile){
+                                layer = new Cesium.WebMapServiceImageryProvider(WMSUtils.wmsToCesiumOptions(options));
+                            } else {
+                                layer = buildSingleTileLayer(options);
+                            }
+                            resolve(layer);
+                        }
+                    
+                    })                    
+                    .subscribe({
+                        error: error => reject(error)
+                    });
+                });
+            }
+            
+        } else {
+            layer = new Cesium.SingleTileImageryProvider(WMSUtils.wmsToCesiumOptionsSingleTile(options));
+        }
+    } else {
+        
+        if (options.group !== 'background'){
+            if (options.dimensions !== null && options.dimensions.length > 0) {
+                hasTimeDimension = options.dimensions.some(dim => dim.name === "time");
+                if (!hasTimeDimension){
+                    layer = new Cesium.WebMapServiceImageryProvider(WMSUtils.wmsToCesiumOptions(options));
+                } else {
+                   return await getLayerFromObservable();          
+                }
+            } else {
+                // potrebbe essere che sto aggiungendo il layer nella scena 3d quindi faccio una request per sapere
+                // se il layer contiene la dimensione time in quanto options.dimension è null
+                return  new Promise((resolve,reject) => { MultiDim.describeDomains(MultiDim.getMultidimURL(options), options.name)
+                    .switchMap( domains => {
+                        const dimensions = domainsToDimensionsObject(domains , MultiDim.getMultidimURL(options)) || [];
+                        if (dimensions && dimensions.length > 0) {
+                            hasTimeDimension = dimensions.some( dim => dim.name === "time")
+                            if (hasTimeDimension){
+                                const result =dimensions.filter( dim => dim.name === "time");
+                                const space = dimensions.filter( dim => dim.name === "space");
+                                if (result && result.length){
+                                    const dataRange = getStartEndDomainValues(result[0].domain);
+                                    const layer = setInitDataLayer(dataRange,map,result[0]);
+                                    Bboxlayers.set(options.name, space[0].domain);
+                                    resolve(layer);
+                                }
+                            } else {
+                                if (options.singleTile == true){
+                                    layer = buildSingleTileLayer(options);
+                                } else {
+                                    layer = new Cesium.WebMapServiceImageryProvider(WMSUtils.wmsToCesiumOptions(options));
+                                }
+                                resolve(layer);
+                            }
+                        } else {
+                            if (options.singleTile == true){
+                                layer = buildSingleTileLayer(options);
+                            } else {
+                                layer = new Cesium.WebMapServiceImageryProvider(WMSUtils.wmsToCesiumOptions(options));
+                            }
                             resolve(layer);
                         }
                     
@@ -98,84 +175,125 @@ const createLayer =  async (options,map) => {
                 ...params
             }
         };
-        return createLayer(newOptions);
+        return createLayer(newOptions,map);
     };
     return layer;
     
-    async function  getLayerFromObservable() {
-        return await new Promise((resolve,reject) => {
-                MultiDim.describeDomains(MultiDim.getMultidimURL(options),options.name,
+    function setSingleTileParameters(options) {
+        const rectangle = Cesium.Rectangle.fromDegrees(
+            parseFloat(options.bbox.bounds.minx), // west (longitude)
+            parseFloat(options.bbox.bounds.miny), // south (latitude)
+            parseFloat(options.bbox.bounds.maxx), // east (longitude)
+            parseFloat(options.bbox.bounds.maxy) // north (latitude)
+        );
+        var singleTileTilingScheme = new Cesium.GeographicTilingScheme({
+            rectangle: rectangle, // get the BBOX of the named layer
+            numberOfLevelZeroTilesX: 1,
+            numberOfLevelZeroTilesY: 1
+        });
+        options.tiled = false;
+        var parameters = {
+            styles: options.styles !== undefined ? options.styles : "",
+            transparent: options.transparent !== undefined ? options.transparent : true,
+            opacity: options.opacity !== undefined ? options.opacity : 1,
+        };
+        options.parameters = parameters;
+        const newCesiumOptions = {
+            ...options,
+            rectangle: rectangle,
+            tilingScheme: singleTileTilingScheme,
+            tileWidth: 2048, // Optional: Define tile width, typically 256 or 512
+            tileHeight: 1024, // Optional: Define tile height, typically 256 or 512
+            minimumLevel: 0, // Ensure we start at the lowest level (0)
+            maximumLevel: 0,
+        };
+        return newCesiumOptions;
+    }
+
+    async function getLayerFromObservable() {
+        return await new Promise((resolve, reject) => {
+            MultiDim.describeDomains(MultiDim.getMultidimURL(options), options.name,
                 options.dimensions[0].name)
                 .first().subscribe(result => {
-                Bboxlayers.set(options.name, result.Domains.SpaceDomain.BoundingBox);
-                console.log("load layer "+options.name);
-                const dataRange = getStartEndDomainValues(result.Domains.DimensionDomain.Domain);
-                const layer = setInitDataLayer(dataRange,map,result.Domains.DimensionDomain);
-               
-                resolve(layer);
-            },reject) })
-         
-       
+                    Bboxlayers.set(options.name, result.Domains.SpaceDomain.BoundingBox);
+                    console.log("load layer " + options.name);
+                    const dataRange = getStartEndDomainValues(result.Domains.DimensionDomain.Domain);
+                    const layer = setInitDataLayer(dataRange, map, result.Domains.DimensionDomain);
+
+                    resolve(layer);
+                }, reject)
+        })
+
+
     }
-    function setInitDataLayer(dataRange,map,domain) {
-        const initialRange = {start: new Date(dataRange[0]), end: new Date(dataRange[1] || dataRange[0])};
-        const clock = createCeisumClock( initialRange,map);
+    function setInitDataLayer(dataRange, map, domain) {
+        const initialRange = { start: new Date(dataRange[0]), end: new Date(dataRange[1] || dataRange[0]) };
+        const clock = createCeisumClock(initialRange, map);
+        cloneclock = { ...clock };
         const clockViewModel = new Cesium.ClockViewModel(clock);
         const viewModel = new Cesium.AnimationViewModel(clockViewModel);
         let domainValues;
-        if ( domain.Domain && domain.Domain.indexOf('--') < 0){
-            domainValues  = extractValuesBeforeSlash(domain.Domain);
-           //  domainValues = domain.Domain && domain.Domain.indexOf('--') < 0
-             
+        if (domain.Domain && domain.Domain.indexOf('--') < 0) {
+            domainValues = extractValuesBeforeSlash(domain.Domain);
+
         } else {
-            if (domain.Domain && domain.Domain.indexOf('--') < 0){
-                 domainValues  = extractValuesBeforeSlash(domain.domain);
+            if (domain.domain && domain.domain.indexOf('--') < 0) {
+                domainValues = extractValuesBeforeSlash(domain.domain);
             }
-        } 
-        
+        }
+
         var times;
-        if (domainValues && domainValues.length>0){
-             
-             times= new Cesium.TimeIntervalCollection.fromIso8601DateArray({
-                iso8601Dates :domainValues,
+        if (domainValues && domainValues.length > 0) {
+
+            times = new Cesium.TimeIntervalCollection.fromIso8601DateArray({
+                iso8601Dates: domainValues,
                 leadingInterval: true,
                 trailingInterval: true,
                 isStopIncluded: false, // We want stop time to be part of the trailing interval
                 dataCallback: dataCallback,
             });
         } else {
-            
-            const {range, resolution} = roundRangeResolution(initialRange,20);
+
+            const { range, resolution } = roundRangeResolution(initialRange, 20);
             times = Cesium.TimeIntervalCollection.fromIso8601({
-            iso8601: range.start.toISOString()+"/"+range.end.toISOString()+"/"+resolution,
-            leadingInterval: true,
-            trailingInterval: true,
-            isStopIncluded: false, // We want stop time to be part of the trailing interval
-            dataCallback: dataCallback,
-            }); 
+                iso8601: range.start.toISOString() + "/" + range.end.toISOString() + "/" + resolution,
+                leadingInterval: true,
+                trailingInterval: true,
+                isStopIncluded: false, // We want stop time to be part of the trailing interval
+                dataCallback: dataCallback,
+            });
         }
-         //create Timeline Widget
-         createTimeLineWidget(clock,map,domainValues && domainValues.length>0 ? domainValues:times._intervals.map(item => item.data.Time));
-         //create Animation Widget 
-         createAnimationWidget(viewModel,map);
-        // Ensure the scene re-renders on each tick
-        
-        const layer = new Cesium.WebMapServiceImageryProvider(
-            {
-                url: options.url,
-                layers: options.name,
-                style: "default",
-                parameters: {
-                    "transparent": "true",
-                    "format": options.format,
-                },
-                clock: clock,
-                times: times,
-                credit: "Almaviva"
-            }
-            
-        )  
-              
+        //create Timeline Widget
+        createTimeLineWidget(clock, map, domainValues && domainValues.length > 0 ? domainValues : times._intervals.map(item => item.data.Time));
+        //create Animation Widget 
+        createAnimationWidget(viewModel, map);
+        var layer ;
+        options.credits="Almaviva";
+        if (options.singleTile){
+            layer = buildSingleTileLayer(options,clock,times)
+     
+        } else {
+            var newCesiumOptions = wmsToCesiumOptions(options);
+            layer = new Cesium.WebMapServiceImageryProvider(
+                {
+                    url: options.url,
+                    layers: options.name,
+                   
+                    parameters: {
+                        "transparent": "true",
+                        "format": newCesiumOptions.parameters.format,
+                        "styles": newCesiumOptions.parameters.styles,
+                        // "access_token" : newCesiumOptions.parameters.access_token,
+                        // "opacity":  options.opacity,
+                    },
+                    clock: clock,
+                    times: times,
+                    credit: newCesiumOptions.credit,
+                }
+
+            )
+        }
+
         layer.updateParams = (params) => {
             const newOptions = {
                 ...options,
@@ -184,12 +302,40 @@ const createLayer =  async (options,map) => {
                     ...params
                 }
             };
-            return createLayer(newOptions);
+            return createLayer(newOptions, map);
         };
-      
-      
+
+
         return layer;
     }
+
+    function buildSingleTileLayer(options,clock,times){
+        var newCesiumOptions = setSingleTileParameters(options);
+        newCesiumOptions = wmsToCesiumOptions(newCesiumOptions);
+        var layer = new Cesium.WebMapServiceImageryProvider(
+            {
+                url: options.url,
+                rectangle: newCesiumOptions.rectangle,
+                layers: options.name,                
+                parameters :{
+                    "transparent" : "true",
+                    "format": newCesiumOptions.parameters.format,
+                    "tiled": "false",
+                    "styles": newCesiumOptions.parameters.styles || "",
+                    //"access_token" : newCesiumOptions.parameters.access_token !== undefined ? newCesiumOptions.parameters.access_token:undefined,                  
+                } ,
+                clock: clock !== undefined ? clock: undefined,
+                times: times !== undefined ? times: undefined,
+                tilingScheme: newCesiumOptions.tilingScheme,
+                tileHeight: newCesiumOptions.tileHeight,
+                tileWidth: newCesiumOptions.tileWidth,
+                credit: newCesiumOptions.credit,
+                minimumLevel: newCesiumOptions.minimumLevel, // Ensure we start at the lowest level (0)
+                maximumLevel: newCesiumOptions.maximumLevel,
+            });
+        return layer;    
+    };
+
     function createTimeLineWidget(clock,map,domainValues) {
         const cesiumContainer = document.getElementsByClassName(map.cesiumWidget.container.className)[0];
          // Get the width of the Cesium container
@@ -197,34 +343,50 @@ const createLayer =  async (options,map) => {
 
         // Create and append timeline container
         var timelineContainer = document.getElementById('timelineContainer');
-        if (timelineContainer!==undefined && timelineContainer == null) {
-             timelineContainer = document.createElement('div');
+        if (timelineContainer !== undefined && timelineContainer == null) {
+            timelineContainer = document.createElement('div');
             timelineContainer.id = 'timelineContainer';
             timelineContainer.style.position = 'absolute';
-            timelineContainer.style.bottom = '35px';
+            timelineContainer.style.bottom = '30px';
             timelineContainer.style.left = '340px';
-            //timelineContainer.className='timeline-plugin';
             // Set the width of the timeline container to 80% of the Cesium container width
             timelineContainer.style.width = cesiumContainerWidth * 0.71 + "px";
 
             timelineContainer.style.height = '50px';
             document.getElementsByClassName(map.cesiumWidget.container.className)[0].appendChild(timelineContainer);
         }
-        var timeline = new Cesium.Timeline(timelineContainer, clock);
+        timeline = new Cesium.Timeline(timelineContainer, clock);
         const julianDates = domainValues.map(dateStr => Cesium.JulianDate.fromIso8601(dateStr));
         
         timeline.resize();
         timeline.addEventListener('settime', function (e) {
             clock.currentTime = e.timeJulian;
-            
+            setDafaultForDropDownDateList();
+            //dateDropdown.innerHTML = '';
+            map.scene.requestRender();
         }, false);
+        // force rerender scene when time line is moving
+        timeline.addEventListener('settime', function() {
+            map.scene.requestRender();
+        });
+
+        clock.onTick.addEventListener(function(clock) {
+            map.scene.requestRender();
+        });
+        map.scene.requestRenderMode = false;
+        
       
+        const dropdownContainer = document.getElementById("dropdownContainer");
+
+        //addCustomBookmarks(timelineContainer,julianDates,clock,options.id,map,timeline);
+        // Example usage: Call this function to add the dropdowns to a specific container
+        
+        addDropdownsToDOM(dropdownContainer,map,julianDates,options.id,clock,false); // 'dropdownContainer' is the id of the container element in your HTML
+
        
-       
-        addCustomBookmarks(timelineContainer,julianDates,clock,options.id,map,timeline);
-       
-        timeline.zoomTo(clock.startTime, clock.stopTime);
         timeline.updateFromClock();
+        timeline.zoomTo(clock.startTime, clock.stopTime);
+        
         return timelineContainer;
     }
 
@@ -232,7 +394,7 @@ const createLayer =  async (options,map) => {
 
     function createAnimationWidget(viewModel,map) {
         var animationContainer = document.getElementById('animationContainer');
-        if (animationContainer!==undefined && animationContainer == null) {
+        if (animationContainer !== undefined && animationContainer === null) {
             animationContainer = document.createElement('div');
             animationContainer.id = 'animationContainer';
             animationContainer.style.position = 'absolute';
@@ -250,6 +412,9 @@ const createLayer =  async (options,map) => {
     
 };
 
+
+
+
 const updateLayer = (layer, newOptions, oldOptions,map) => {
     const requiresUpdate = (el) => WMSUtils.PARAM_OPTIONS.indexOf(el.toLowerCase()) >= 0;
     const newParams = newOptions && newOptions.params;
@@ -266,42 +431,43 @@ const updateLayer = (layer, newOptions, oldOptions,map) => {
         newOptions.securityToken !== oldOptions.securityToken ||
         !isEqual(newOptions.layerFilter, oldOptions.layerFilter) ||
         newOptions.tileSize !== oldOptions.tileSize) {
-        return createLayer(newOptions);
+        return createLayer(newOptions,map);
     }
-    if (newOptions.visibility != oldOptions.visibility){
+    if (newOptions.visibility !== oldOptions.visibility){
         const timelineContainer = document.getElementById('timelineContainer');
+        const dropdownContainer = document.getElementById("dropdownContainer");
+
         if (newOptions.visibility){
-            if (layer._timeDynamicImagery!==undefined && layer._timeDynamicImagery._times._intervals !== null){
+            if (layer._timeDynamicImagery !== undefined && layer._timeDynamicImagery._times._intervals !== null){
                 setVisibilityTimeLine('visible',layer);
                 const TimeintervalsjulianDates = layer._timeDynamicImagery._times._intervals;
                 const julianDates = buildJulianDates(TimeintervalsjulianDates);
-                addCustomBookmarks(timelineContainer,julianDates,map.clock,newOptions.id,map,timeline)
+                addDropdownsToDOM(dropdownContainer ,map,julianDates,newOptions.id,map.clock,false); // 'dropdownContainer' is the id of the container element in your HTML
+                //addCustomBookmarks(timelineContainer, julianDates, map.clock, newOptions.id, map, timeline)
             } 
         } else {
             /* Start Business logic to hidden o remove timeline */
-            if (layer._timeDynamicImagery !==undefined &&             
+            if (layer._timeDynamicImagery !== undefined &&             
                 layer._timeDynamicImagery._times._intervals !== null && 
-                layer._timeDynamicImagery._times._intervals.length>0){
+                layer._timeDynamicImagery._times._intervals.length > 0 ) {
                 const visibleLayers = map.imageryLayers._layers.filter(layer => layer.show);
-                
-                removeBookmark( layer,newOptions.id);
-              
-                var foundwWmsWithTimeline= false;
+                var foundwWmsWithTimeline = false;
                 visibleLayers.forEach(layer => {
                         const wmsProvider = layer.imageryProvider;
                     
-                        if (layer != wmsProvider  && wmsProvider._timeDynamicImagery !==  undefined
-                            &&  wmsProvider._timeDynamicImagery._times !=null 
+                        if (layer !== wmsProvider  && wmsProvider._timeDynamicImagery !==  undefined
+                            &&  wmsProvider._timeDynamicImagery._times !== null 
                             && wmsProvider._timeDynamicImagery._times._intervals 
-                            && wmsProvider._timeDynamicImagery._times._intervals.length>0
+                            && wmsProvider._timeDynamicImagery._times._intervals.length > 0
                         ){
-                            foundwWmsWithTimeline=true;
+                            foundwWmsWithTimeline = true;
                         }
                     
                 })
                 if (!foundwWmsWithTimeline) {
                     setVisibilityTimeLine('hidden',layer);
                 } 
+                removeDropDownLayer(newOptions.id);
                 
             }
         /* End Business logic to hidden  timeline */
@@ -310,6 +476,31 @@ const updateLayer = (layer, newOptions, oldOptions,map) => {
     }
     return null;
 };
+
+function setDafaultForDropDownDateList() {
+    var dateDropdown = document.getElementById("dateDropdown");
+    if (dateDropdown) {
+        var foundDefault = false;
+        var options = dateDropdown.options;
+        for (var i = 0; i < options.length; i++) {
+            if (options[i].value === '') {
+                options[i].selected = true;
+                foundDefault = true;
+                break;
+            }
+        }
+        if (!foundDefault) {
+            var defaultDateOption = document.createElement('option');
+            // Clear existing options
+            defaultDateOption.value = '';
+            defaultDateOption.disabled = true;
+            defaultDateOption.selected = true;
+            defaultDateOption.textContent = 'Select a Date';
+            defaultDateOption.style.fontSize = '80%';
+            dateDropdown.appendChild(defaultDateOption);
+        }
+    }
+}
 
 function buildJulianDates(TimeintervalsjulianDates) {
     const julianDates = [];
@@ -332,17 +523,23 @@ function setVisibilityTimeLine(visibility) {
         animationContainer.style.visibility = visibility;
 
     }
-    
+
+    const dropdownContainer = document.getElementById("dropdownContainer");
+    if (dropdownContainer !== null) {
+        dropdownContainer.style.visibility = visibility;
+
+    }
     
 
 }
+
 function createCeisumClock( initialRange,map) {
     const clock = map.clock;
     const starttime = Cesium.JulianDate.fromDate(initialRange.start);
     const stopTime = Cesium.JulianDate.fromDate(initialRange.end);
-    clock.startTime =Cesium.JulianDate.compare(clock.startTime ,starttime)<=0 ? clock.startTime :starttime  ;
-    clock.currentTime = Cesium.JulianDate.compare(clock.startTime ,starttime)<=0 ? clock.startTime :starttime  ;
-    clock.stopTime = Cesium.JulianDate.compare(clock.stopTime ,stopTime)<=0 ? stopTime : clock.stopTime;
+    clock.startTime =Cesium.JulianDate.compare(clock.startTime ,starttime) <= 0 ? clock.startTime : starttime  ;
+    clock.currentTime = Cesium.JulianDate.compare(clock.startTime ,starttime) <= 0 ? clock.startTime : starttime  ;
+    clock.stopTime = Cesium.JulianDate.compare(clock.stopTime ,stopTime) <= 0 ? stopTime : clock.stopTime;
     clock.clockRange = Cesium.ClockRange.CLAMPED;
     clock.clockStep = Cesium.ClockStep.TICK_DEPENDENT;
     clock.multiplier = 1800;
@@ -365,18 +562,49 @@ function dataCallback(interval, index) {
 
   function removeBookmark(layer, id) {
     document.querySelectorAll('.bookmark').forEach(el => {
-        if (el.id.includes(id))
-            el.remove()
-    });
-   
-}
+        if (el.id.includes(id)){
+            el.remove();
+            
+        }
 
-function addCustomBookmarks(timelineContainer,julianDates,clock,id,map,timeline) {
-   var bookmarks = []; // Store bookmark elements for later updates
+    });
+
+  }
+
+  function removeDropDownLayer(id) {
+    var elements = document.querySelector("[id='layerDropdown']");
+    if (elements && elements.length>0) {
+        Array.from(elements.options).forEach(el => {
+            if (el.value !== "" && el.value.includes(id)){
+                el.remove();
+                
+            }
+        });
+    }
+     elements = document.querySelector("[id='dateDropdown']");
+     if (elements && elements.length>0) {
+        Array.from(elements.options).forEach(el => {
+            if (el.id !== "" && el.id.includes(id)){
+                el.remove();
+                
+            }
+        });
+    }
+    var options = document.getElementById('layerDropdown').options;
+    for (var i = 0; i < options.length; i++) {
+        if (options[i].value === '') {  
+            options[i].selected = true;
+            break;
+        }
+    }
+    var dateDropdown = document.getElementById('dateDropdown')
+    dateDropdown.innerHTML = '';
+    };
+let debounceTimeout;
+function addCustomBookmarks(timelineContainer, julianDates, clock, id, map, timeline) {
+   
    var i=0;
    julianDates.forEach(julianDate => {
-       const gregorianDate = Cesium.JulianDate.toDate(julianDate);
-
        const bookmarkElement = document.createElement('div');
        bookmarkElement.className = 'bookmark';
 
@@ -384,20 +612,20 @@ function addCustomBookmarks(timelineContainer,julianDates,clock,id,map,timeline)
        const totalDuration = Cesium.JulianDate.secondsDifference(clock.stopTime, clock.startTime);
        const tickOffset = Cesium.JulianDate.secondsDifference(julianDate, clock.startTime);
        const tickPosition = (tickOffset / totalDuration) * timelineContainer.clientWidth;
-       bookmarkElement.id =id+"-"+i;
+       bookmarkElement.id = id+"-"+i;
        bookmarkElement.style.left = `${tickPosition}px`;
        bookmarkElement.style.bottom = `10px`;
        const match = id.match(/geonode:(.*?)__/);
        const extractedWord = match ? match[1] : null;
-       bookmarkElement.title=extractedWord+" to " +Cesium.JulianDate.toIso8601(julianDate)
+       bookmarkElement.title = extractedWord + " to " + Cesium.JulianDate.toIso8601(julianDate)
         // Add click event listener to move to the specific date
         bookmarkElement.addEventListener('click', (e) => {
             clock.currentTime = julianDate;
             clock.shouldAnimate = false; 
-            const layer = map.scene.imageryLayers._layers.find(l =>  e.currentTarget.id.includes(l._imageryProvider.layerId?l._imageryProvider.layerId:l._imageryProvider._layers));
+            const layer = map.scene.imageryLayers._layers.find(l =>  e.currentTarget.id.includes(l._imageryProvider.layerId ? l._imageryProvider.layerId:l._imageryProvider._layers));
             if (layer) {           
                 const layername = layer._imageryProvider._layers
-                const sourcecrs =Bboxlayers.get(layername).CRS;
+                const sourcecrs = Bboxlayers.get(layername).CRS;
                 const { minx, miny, maxx, maxy } = Bboxlayers.get(layername);
                 const bounds = reprojectBbox([minx, miny, maxx, maxy], sourcecrs, "EPSG:4326");
                 const rectangle = Cesium.Rectangle.fromDegrees(parseFloat(bounds[0]), parseFloat(bounds[1]), parseFloat(bounds[2]), parseFloat(bounds[3]));
@@ -409,41 +637,287 @@ function addCustomBookmarks(timelineContainer,julianDates,clock,id,map,timeline)
        
        
 
-       timelineContainer.appendChild(bookmarkElement);
-       bookmarks.push({ element: bookmarkElement, julianDate: julianDate }); // Store the bookmark and its Julian date
-       i++;
+        timelineContainer.appendChild(bookmarkElement);
+        bookmarks.push({ element: bookmarkElement, julianDate: julianDate }); // Store the bookmark and its Julian date
+        i++;
     });
     
     function calculateBookmarkPosition(julianDate, timeline) {
         // Get the current visible start and end times of the timeline
         const startTime = timeline._startJulian; // Start time in JulianDate
         const stopTime = timeline._endJulian;   // End time in JulianDate
-
+        const iso8601DateStart = Cesium.JulianDate.toIso8601(startTime);
+        const iso8601DateEnd = Cesium.JulianDate.toIso8601(stopTime);
+        const iso8601DatActual = Cesium.JulianDate.toIso8601(julianDate)
         const totalVisibleDuration = Cesium.JulianDate.secondsDifference(stopTime, startTime);
         const timeOffset = Cesium.JulianDate.secondsDifference(julianDate, startTime);
-
+        console.log("start{"+iso8601DateStart+"} end {"+iso8601DateEnd+"} actual {"+iso8601DatActual+"} totalVisibleDuration{"+totalVisibleDuration+"} offset{"+timeOffset+"}");
         // Calculate the position relative to the timeline width
         const tickPosition = (timeOffset / totalVisibleDuration) * timelineContainer.clientWidth;
         return tickPosition;
     }
 
     function updateBookmarks() {
-        const totalDuration = Cesium.JulianDate.secondsDifference(clock.stopTime, clock.startTime);
-        //console.log('Updating bookmarks. Total Duration:', totalDuration);
+        //const totalDuration = Cesium.JulianDate.secondsDifference(clock.stopTime, clock.startTime);
+        // console.log('Updating bookmarks. Total Duration:', totalDuration);
         bookmarks.forEach(bookmark => {
             const tickPosition = calculateBookmarkPosition(bookmark.julianDate, timeline);
-            bookmark.element.style.left = `${tickPosition}px`;
-            bookmark.element.offsetWidth; // Force DOM reflow
+            if (bookmark.element.id){
+                bookmark.element.style.left = `${tickPosition}px`;
+                //bookmark.element.offsetWidth; // Force DOM reflow
+            }
         });
 
         // Request a re-render of the Cesium scene (if necessary)
         map.scene.requestRender();
     }
-    timelineContainer.addEventListener('wheel', function(event) {
+
+    wheelHandler = function (event){
+        event.preventDefault();
+        clearTimeout(debounceTimeout); // Clear previous timeout
+        debounceTimeout = setTimeout(updateBookmarks, 100); // Set new
+        //setTimeout(updateBookmarks, 500);
+    };
+    timelineContainer.addEventListener('wheel', wheelHandler);
+ 
+    
+    
+}
+
+function addDropdownsToDOM(dropdownContainer ,map,julianDates,id,clock,update) {
+        
+    const cesiumContainer = document.getElementsByClassName(map.cesiumWidget.container.className)[0];
+    // Get the width of the Cesium container
+    const cesiumContainerWidth = cesiumContainer.offsetWidth;
+    // Create a container element (div) for the dropdowns
+   
+    let extractedWord;
+    ({ extractedWord, dropdownContainer } = buildDropDownContainer(dropdownContainer, cesiumContainerWidth, map, id));
+   
+    // Add event listener for layer selection
+    populateLayerDropdown(id,extractedWord,julianDates,clock,map);
+    
+
+   
+}
+
+function buildDropDownContainer(dropdownContainer, cesiumContainerWidth, map, id) {
+     
+    if (dropdownContainer !== undefined && dropdownContainer == null) {
+        dropdownContainer = document.createElement('div');
+        dropdownContainer.id = 'dropdownContainer';
+        dropdownContainer.style.position = 'absolute';
+        dropdownContainer.style.bottom = '80px';
+        dropdownContainer.style.left = '375px';
+        dropdownContainer.style.fontSize = '80%';
+        dropdownContainer.className = 'cesium-baseLayerPicker-dropDown';
+        // Set the width of the timeline container to 80% of the Cesium container width
+        dropdownContainer.style.width = cesiumContainerWidth * 0.20 + "px";
+
+        dropdownContainer.style.height = '60px';
+        document.getElementsByClassName(map.cesiumWidget.container.className)[0].appendChild(dropdownContainer);
        
-        setTimeout(updateBookmarks, 100); // Delay to allow timeline to finish zooming
+    }
+     var buttonContainer = document.getElementById('buttonContainer');
+     if (buttonContainer !== undefined && buttonContainer == null) {
+         buttonContainer = document.createElement('div');
+         buttonContainer.id = "buttonContainer";
+         buttonContainer.style.position = 'absolute';
+         buttonContainer.style.bottom = '80px';
+         buttonContainer.style.left = '338px';
+         //buttonContainer.style.backgroundColor = '#8080808c';
+         buttonContainer.className="cesium-button cesium-toolbar-button";
+         buttonContainer.title="Time Filter"
+         buttonContainer.addEventListener('click', function (event) {
+            if (dropdownContainer.className === 'cesium-baseLayerPicker-dropDown') {
+                dropdownContainer.className = 'cesium-baseLayerPicker-dropDown cesium-baseLayerPicker-dropDown-visible';
+            } else {
+                dropdownContainer.className = 'cesium-baseLayerPicker-dropDown';
+            }
+        });
+         var imgbutton = document.createElement('img');
+         imgbutton.draggable= false;
+         imgbutton.style.filter= "invert(1)";
+         imgbutton.className ="cesium-baseLayerPicker-selected";
+         imgbutton.src="/static/mapstore/img/filter.png";
+         buttonContainer.appendChild(imgbutton);
+        document.getElementsByClassName(map.cesiumWidget.container.className)[0].appendChild(buttonContainer);
+        
+     }
+    const match = id.match(/geonode:(.*?)__/);
+    const extractedWord = match ? match[1] : null;
+    // Create the Layer dropdown if not exsist 
+    var layerDropdown = document.getElementById("layerDropdown");
+    if (layerDropdown !== undefined && layerDropdown == null) {
+        layerDropdown = document.createElement('select');
+        layerDropdown.id = 'layerDropdown';
+        layerDropdown.className = 'cesium-button';
+
+        // Create a default option for the layer dropdown
+        var defaultLayerOption = document.createElement('option');
+        defaultLayerOption.value = '';
+        defaultLayerOption.disabled = true;
+        defaultLayerOption.selected = true;
+        defaultLayerOption.textContent = 'Select a Layer';
+        defaultLayerOption.style.fontSize = '80%';
+        layerDropdown.appendChild(defaultLayerOption);
+    }
+    var dateDropdown = document.getElementById("dateDropdown");
+    // Create the Date dropdown
+    if (dateDropdown !== undefined && dateDropdown == null) {
+        dateDropdown = document.createElement('select');
+        dateDropdown.id = 'dateDropdown';
+        dateDropdown.className = 'cesium-button';
+        // Create a default option for the date dropdown
+        var defaultDateOption = document.createElement('option');
+        // Clear existing options
+        defaultDateOption.value = '';
+        defaultDateOption.disabled = true;
+        defaultDateOption.selected = true;
+        defaultDateOption.textContent = 'Select a Date';
+        defaultDateOption.style.fontSize = '80%';
+        dateDropdown.appendChild(defaultDateOption);
+        dateDropdown.innerHTML = '';
+        // Append the dropdowns to the container
+        var label = document.createElement('label');
+        label.style.fontSize = '90%';
+        label.style.display = 'block';
+        label.style.marginBottom = '1px';
+        label.textContent = 'Time Filter';
+
+        dropdownContainer.appendChild(label);
+        dropdownContainer.appendChild(layerDropdown);
+        dropdownContainer.appendChild(dateDropdown);
+
+    }
+    return { extractedWord, dropdownContainer };
+}
+
+// Function to populate the Layer dropdown
+function populateLayerDropdown(id, name, julianDates, clock, map) {
+    var layerDropdown = document.getElementById('layerDropdown');
+    
+    // se gia è presente un layer lo elimino per riaggiungerlo
+    Array.from(layerDropdown.options).forEach(el => {
+        if (el.value===id) {
+            el.remove();
+        }
+    })
+
+    var option = document.createElement('option');
+    option.value = id;
+    option.text = name;
+    option.style.fontSize = '80%';
+    layerDropdown.appendChild(option);
+
+    if (layerDropdown) {
+        layerDropdown.addEventListener('change', function (event) {
+            var selectedlayer = event.target.value;
+            if (selectedlayer !== '') {
+                //localStorage.setItem(selectedlayerKey, selectedlayer);
+                layerDates = JSON.parse(localStorage.getItem(storageKey)) || [];
+                const existingLayer = layerDates.find(item => item.layer === selectedlayer);
+                if (!existingLayer){
+                    layerDates.push({ layer: selectedlayer, lastDate: '' });
+                }
+               
+                if (selectedlayer === id) {
+                    populateDateDropdown(id, julianDates, clock, map);
+                
+                }
+            }
+        });
+        const existingLayer = layerDates.find(item => item.layer === id );
+    
+        if (existingLayer && existingLayer.lastDate !=='') {
+            // Update the date for the existing layer
+           
+            layerDropdown.value = existingLayer.layer;
+            populateDateDropdown(id, julianDates, clock, map);
+           
+        } 
+        
+    }
+    
+}
+
+// Function to populate the Date dropdown
+function populateDateDropdown(id,dates,clock,map) {
+    layerDates = JSON.parse(localStorage.getItem(storageKey));
+    var dateDropdown = document.getElementById('dateDropdown');
+    dateDropdown.options.length = 0;
+    var i = 0;
+    const uniq = [
+        ...new Map(dates.map(item => [item.dayNumber + '_' + item.secondsOfDay, item])).values()
+    ];
+ 
+    uniq.forEach(function(date) {
+        var gregorianDate = Cesium.JulianDate.toGregorianDate(date);
+        var isoDate = Cesium.JulianDate.toIso8601(date);
+        
+        var option = document.createElement('option');
+        option.id = id+"_"+i 
+        option.value = isoDate;
+        option.text = `${gregorianDate.year}-${gregorianDate.month}-${gregorianDate.day}`;
+        option.style.fontSize = '80%';
+       
+        dateDropdown.appendChild(option);
+        i++;
     });
     
+    // Date selection event
+    dateDropdown.addEventListener('change', function() {
+        var selectedDate = this.value;
+        if (selectedDate !== '') {
+           // localStorage.setItem(selectedDateKey, selectedDate);
+           var layerDropdown = document.getElementById('layerDropdown');
+           const existingLayer = layerDates.find(item => item.layer === layerDropdown.value);
+            if (existingLayer) {
+                existingLayer.lastDate = selectedDate;
+            } else {
+                layerDates.push({ layer: id, lastDate: selectedDate });
+            }
+            localStorage.setItem(storageKey, JSON.stringify(layerDates));
+            //console.log('Selected Date:', selectedDate);
+            clock.currentTime = Cesium.JulianDate.fromIso8601(selectedDate);
+            clock.shouldAnimate = false; 
+            const layername = id.split('__')[0];
+            const sourcecrs = Bboxlayers.get(layername).CRS;
+            const { minx, miny, maxx, maxy } = Bboxlayers.get(layername);
+            const bounds = reprojectBbox([minx, miny, maxx, maxy], sourcecrs, "EPSG:4326");
+            const rectangle = Cesium.Rectangle.fromDegrees(parseFloat(bounds[0]), parseFloat(bounds[1]), parseFloat(bounds[2]), parseFloat(bounds[3]));
+            map.camera.flyTo({destination:rectangle});   
+            map.scene.requestRender();  
+            var dateDropdownContainer = document.getElementById('dateDropdownContainer');
+            if(dateDropdownContainer && dateDropdownContainer !== null) {
+                dateDropdownContainer.style.display = 'none'; // Hide date dropdown  
+            }
+        }
+      
+       
+    // You can now use the selectedDate for timeline-related actions
+    });
+    var layerDropdown = document.getElementById('layerDropdown');
+    const existingLayer = layerDates.find(item => item.layer === layerDropdown.value);
+
+    if (existingLayer && existingLayer.lastDate !=='') {
+        // Update the date for the existing layer
+       
+        dateDropdown.value = existingLayer.lastDate;
+        const event = new Event('change');
+        dateDropdown.dispatchEvent(event);
+    } 
+   
+}
+
+
+// Function to remove the dropdownContainer from the DOM
+function removeDropdownContainer() {
+    var dropdownContainer = document.getElementById('dropdownContainer');
+    if (dropdownContainer) {
+        dropdownContainer.remove();  // This removes the container and its contents from the DOM
+        //console.log('Dropdown container removed');
+    } 
 }
   
 Layers.registerType('wms', {create: createLayer, update: updateLayer});

@@ -98,6 +98,17 @@ export function wmsToCesiumOptions(options) {
     // NOTE: can we use opacity to manage visibility?
     const urls = getURLs(isArray(options.url) ? options.url : [options.url]);
     const headers = getAuthenticationHeaders(urls[0], options.securityToken);
+    if (options.parameters !== undefined) {
+        options.parameters = {
+            ...options.parameters,
+            tiled: options.tiled !== undefined ? options.tiled : true,
+            format: isVectorFormat(options.format) && 'image/png' || options.format || 'image/png',
+            transparent: options.transparent !== undefined ? options.transparent : true,
+            ...(options._v_ ? {_v_: options._v_} : {}),
+            ...(params || {}),
+            ...getAuthenticationParam(options)
+        }
+    }
 
     return {
         url: new Cesium.Resource({
@@ -114,7 +125,20 @@ export function wmsToCesiumOptions(options) {
         subdomains: urls,
         layers: options.name,
         enablePickFeatures: false,
-        parameters: {
+        rectangle :  options.rectangle === "none" ?
+        undefined : options.rectangle,
+        tilingScheme : options.tilingScheme === "none" ?
+        undefined : options.tilingScheme,
+        tileWidth: options.tileWidth === "none" ?
+        undefined : options.tileWidth,     // Optional: Define tile width, typically 256 or 512
+        tileHeight: options.tileHeight === "none" ?
+        undefined : options.tileHeight ,   // Optional: Define tile height, typically 256 or 512
+        minimumLevel:  options.minimumLevel === "none" ?
+        undefined : options.minimumLevel ,   // Ensure we start at the lowest level (0)
+        maximumLevel:  options.maximumLevel === "none" ?
+        undefined : options.maximumLevel , 
+        parameters : options.parameters? options.parameters : // Ensure no further zoom levels (level 0 is the only level) */
+       {
             styles: options.style || "",
             format: isVectorFormat(options.format) && 'image/png' || options.format || 'image/png',
             transparent: options.transparent !== undefined ? options.transparent : true,
@@ -126,7 +150,7 @@ export function wmsToCesiumOptions(options) {
             ...(params || {}),
             ...getAuthenticationParam(options)
 
-        }
+        },
     };
 }
 

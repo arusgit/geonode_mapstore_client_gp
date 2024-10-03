@@ -36,7 +36,7 @@ const createLayer = (config, map) => {
         break;
     }
     case 'cesiumIon': {
-        Cesium.Ion.defaultAccessToken=config.defaultAccessToken
+        Cesium.Ion.defaultAccessToken = config.defaultAccessToken
         terrainProvider = Cesium.createWorldTerrain(config.options)
          
         break;
@@ -59,9 +59,8 @@ const createLayer = (config, map) => {
     };
 };
 
- async function initializeCesiumTerrain(config) {
-    
-    return await Cesium.CesiumTerrainProvider.fromIonAssetId(1,config.options);
+async function initializeCesiumTerrain(config) {
+    return await Cesium.CesiumTerrainProvider.fromIonAssetId(1 , config.options);
 }
 
 const updateLayer = (layer, newOptions, oldOptions, map) => {

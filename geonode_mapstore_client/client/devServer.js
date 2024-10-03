@@ -72,7 +72,9 @@ module.exports = (devServerDefault, projectConfig) => {
                 pathRewrite: {
                     '/static/mapstore/ms-translations': '/node_modules/mapstore/web/client/translations',
                     '/static/mapstore/dist/js/web-ifc': '/node_modules/web-ifc'
-                }
+                },
+				logLevel: 'debug', // Enable debug level logging for this proxy
+				
             }
         ]
     };

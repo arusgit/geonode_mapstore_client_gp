@@ -12,7 +12,7 @@ import assign from 'object-assign';
 import PropTypes from 'prop-types';
 import { round, isNil } from 'lodash';
 import { getResolutions } from '../../../utils/MapUtils';
-import * as Cesium from 'cesium';
+
 class CesiumLayer extends React.Component {
     static propTypes = {
         map: PropTypes.object,
@@ -29,14 +29,14 @@ class CesiumLayer extends React.Component {
         // in particular for detached layers (eg. Vector, WFS, 3D Tiles, ...)
         const visibility = this.getVisibilityOption(this.props);       
         this.createLayer(this.props.type, { ...this.props.options, visibility }, this.props.position, this.props.map, this.props.securityToken);
-        if (this.layer instanceof Promise){
+        if (this.layer instanceof Promise) {
             this.layer.then( l=> {
-                this.layer=l;
+                this.layer = l;
                 if (this.props.options && this.layer && visibility) {
                     this.addLayer(this.props);
                     this.updateZIndex();
                 }
-            })
+            });
         } else 
         if (this.props.options && this.layer && visibility) {
             this.addLayer(this.props);
@@ -59,7 +59,7 @@ class CesiumLayer extends React.Component {
         }
         if (this.layer instanceof Promise){
             this.layer.then( l=> {
-                this.layer=l;
+                this.layer = l;
                 if (this.props.options && this.layer.updateParams && newProps.options.visibility) {
                     const changed = Object.keys(this.props.options.params).reduce((found, param) => {
                         if (newProps.options.params[param] !== this.props.options.params[param]) {
@@ -78,7 +78,8 @@ class CesiumLayer extends React.Component {
         
                     }
                 }
-            })
+                this.updateLayer(newProps, this.props);
+            });
         } else
         if (this.props.options && this.props.options.params && this.layer.updateParams && newProps.options.visibility) {
             const changed = Object.keys(this.props.options.params).reduce((found, param) => {
@@ -104,7 +105,7 @@ class CesiumLayer extends React.Component {
     componentWillUnmount() {
         if (this.layer instanceof Promise){
             this.layer.then( l=> {
-                this.layer=l;
+                this.layer = l;
                 if (this.layer && this.props.map && !this.props.map.isDestroyed()) {
                     if (this.layer.detached && this.layer?.remove) {
                         this.layer.remove();
@@ -114,10 +115,12 @@ class CesiumLayer extends React.Component {
                         }
         
                         this.props.map.imageryLayers.remove(this.provider);
-                        document.querySelectorAll('.bookmark').forEach(el => {
-                            if (el.id.includes(this.props.options.id))
-                                el.remove()
-                        });
+                        this.removeDropDownContainer();
+                        // document.querySelectorAll('.bookmark').forEach(el => {
+                        //     if (el.id.includes(this.props.options.id)) {
+                        //         el.remove()
+                        //     }
+                        // });
                     }
                     if (this.refreshTimer) {
                        
@@ -137,23 +140,24 @@ class CesiumLayer extends React.Component {
                 }
 
                 this.props.map.imageryLayers.remove(this.provider);
-                // remove timeline bookmark for this layer
-                document.querySelectorAll('.bookmark').forEach(el => {
-                    if (el.id.includes(this.props.options.id))
-                        el.remove()
-                });
+                this.removeDropDownLayer(this.layer._layers);
+                // // remove timeline bookmark for this layer
+                // document.querySelectorAll('.bookmark').forEach(el => {
+                //     if (el.id.includes(this.props.options.id)) {
+                //         el.remove();
+                //     }
+                // });
                 const hasTimeDimension = this.props.map.imageryLayers._layers.some(layer => layer._imageryProvider._timeDynamicImagery);
                 if (!hasTimeDimension){
-                    //document.getElementById("timelineContainer").forEach(element => element.remove());
-                    //document.getElementById("animationContainer").forEach(element => element.remove());
                     const element = document.getElementById("timelineContainer");
                     if (element) {
                       element.remove();
-                     }
-                     const element2 = document.getElementById("animationContainer");
+                    }
+                    const element2 = document.getElementById("animationContainer");
                     if (element2) {
                       element2.remove();
-                     }
+                    }
+                    this.removeDropDownContainer();
                 }
             }
             if (this.refreshTimer) {
@@ -161,6 +165,50 @@ class CesiumLayer extends React.Component {
             }
         }
     }
+
+    removeDropDownContainer() {
+        var dropdownContainer = document.getElementById('dropdownContainer');
+        if (dropdownContainer) {
+            dropdownContainer.remove(); // This removes the container and its contents from the DOM
+            
+        } 
+    }
+
+    removeDropDownLayer(id) {
+        var elements = document.querySelector("[id='layerDropdown']");
+        if (elements && elements.length>0) {
+            Array.from(elements.options).forEach(el => {
+                if (el.value !== "" && el.value.includes(id)){
+                    el.remove();
+                    
+                }
+            });
+        }
+         elements = document.querySelector("[id='dateDropdown']");
+         if (elements && elements.length>0) {
+            Array.from(elements.options).forEach(el => {
+                if (el.id !== "" && el.id.includes(id)){
+                    el.remove();
+                    
+                }
+            });
+        }
+        var layerdropdown = document.getElementById('layerDropdown');
+        if (layerdropdown && layerdropdown.options ){
+            var options = layerdropdown.options;
+            for (var i = 0; i < options.length; i++) {
+                if (options[i].value === '') {  
+                    options[i].selected = true;
+                    break;
+                }
+            }
+        }
+        var dateDropdown = document.getElementById('dateDropdown')
+        if (dateDropdown) {
+              dateDropdown.innerHTML = '';
+        }
+    };
+    
 
     render() {
         if (this.props.children) {
@@ -300,6 +348,18 @@ class CesiumLayer extends React.Component {
 
     updateLayer = (newProps, oldProps) => {
         const newLayer = Layers.updateLayer(newProps.type, this.layer, {...newProps.options, securityToken: newProps.securityToken}, {...oldProps.options, securityToken: oldProps.securityToken}, this.props.map);
+        if (newLayer && newLayer instanceof Promise){
+            newLayer.then( l=> {
+                this.removeLayer();
+                this.layer = l;
+                if (newProps.options.visibility) {
+                    this.addLayer(newProps);
+                  
+                }
+                newProps.map.scene.requestRender();
+            })
+
+        } else 
         if (newLayer) {
             this.removeLayer();
             this.layer = newLayer;
@@ -318,22 +378,23 @@ class CesiumLayer extends React.Component {
         } else {
             if (this.layer instanceof Promise){
                 this.layer.then( l=> {
-                    this.layer=l;
+                    this.layer = l;
                     this.provider = this.props.map.imageryLayers.addImageryProvider(this.layer);
                     this.provider._position = this.props.position;
                     if (newProps.options.opacity !== undefined) {
                         this.provider.alpha = newProps.options.opacity;
+                        this.props.map.scene.requestRender(); 
                     }
-                  
+                                   
                 }
             )} else {
-            this.provider = this.props.map.imageryLayers.addImageryProvider(this.layer);
-            this.provider._position = this.props.position;
-            if (newProps.options.opacity !== undefined) {
-                this.provider.alpha = newProps.options.opacity;
+                this.provider = this.props.map.imageryLayers.addImageryProvider(this.layer);
+                this.provider._position = this.props.position;
+                if (newProps.options.opacity !== undefined) {
+                    this.provider.alpha = newProps.options.opacity;
+                    this.props.map.scene.requestRender();  
+                }           
             }
-           
-          }
         }
         newProps.map.scene.requestRender();
     };
@@ -373,6 +434,3 @@ class CesiumLayer extends React.Component {
 }
 
 export default CesiumLayer;
-
-
-
