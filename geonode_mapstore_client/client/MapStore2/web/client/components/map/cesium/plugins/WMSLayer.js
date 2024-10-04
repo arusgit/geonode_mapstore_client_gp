@@ -361,7 +361,7 @@ const createLayer = async (options,map) => {
         timeline.resize();
         timeline.addEventListener('settime', function (e) {
             clock.currentTime = e.timeJulian;
-            setDafaultForDropDownDateList();
+            setDefaultForDropDownDateList();
             //dateDropdown.innerHTML = '';
             map.scene.requestRender();
         }, false);
@@ -374,15 +374,8 @@ const createLayer = async (options,map) => {
             map.scene.requestRender();
         });
         map.scene.requestRenderMode = false;
-        
-      
-        const dropdownContainer = document.getElementById("dropdownContainer");
-
-        //addCustomBookmarks(timelineContainer,julianDates,clock,options.id,map,timeline);
-        // Example usage: Call this function to add the dropdowns to a specific container
-        
+        const dropdownContainer = document.getElementById("dropdownContainer");        
         addDropdownsToDOM(dropdownContainer,map,julianDates,options.id,clock,false); // 'dropdownContainer' is the id of the container element in your HTML
-
        
         timeline.updateFromClock();
         timeline.zoomTo(clock.startTime, clock.stopTime);
@@ -443,8 +436,7 @@ const updateLayer = (layer, newOptions, oldOptions,map) => {
                 const TimeintervalsjulianDates = layer._timeDynamicImagery._times._intervals;
                 const julianDates = buildJulianDates(TimeintervalsjulianDates);
                 addDropdownsToDOM(dropdownContainer ,map,julianDates,newOptions.id,map.clock,false); // 'dropdownContainer' is the id of the container element in your HTML
-                //addCustomBookmarks(timelineContainer, julianDates, map.clock, newOptions.id, map, timeline)
-            } 
+             } 
         } else {
             /* Start Business logic to hidden o remove timeline */
             if (layer._timeDynamicImagery !== undefined &&             
@@ -477,7 +469,7 @@ const updateLayer = (layer, newOptions, oldOptions,map) => {
     return null;
 };
 
-function setDafaultForDropDownDateList() {
+function setDefaultForDropDownDateList() {
     var dateDropdown = document.getElementById("dateDropdown");
     if (dateDropdown) {
         var foundDefault = false;
@@ -560,16 +552,7 @@ function dataCallback(interval, index) {
     };
   }
 
-  function removeBookmark(layer, id) {
-    document.querySelectorAll('.bookmark').forEach(el => {
-        if (el.id.includes(id)){
-            el.remove();
-            
-        }
-
-    });
-
-  }
+  
 
   function removeDropDownLayer(id) {
     var elements = document.querySelector("[id='layerDropdown']");
@@ -600,89 +583,7 @@ function dataCallback(interval, index) {
     var dateDropdown = document.getElementById('dateDropdown')
     dateDropdown.innerHTML = '';
     };
-let debounceTimeout;
-function addCustomBookmarks(timelineContainer, julianDates, clock, id, map, timeline) {
-   
-   var i=0;
-   julianDates.forEach(julianDate => {
-       const bookmarkElement = document.createElement('div');
-       bookmarkElement.className = 'bookmark';
 
-       // Calculate the left position of the bookmark based on the timeline's start and stop times
-       const totalDuration = Cesium.JulianDate.secondsDifference(clock.stopTime, clock.startTime);
-       const tickOffset = Cesium.JulianDate.secondsDifference(julianDate, clock.startTime);
-       const tickPosition = (tickOffset / totalDuration) * timelineContainer.clientWidth;
-       bookmarkElement.id = id+"-"+i;
-       bookmarkElement.style.left = `${tickPosition}px`;
-       bookmarkElement.style.bottom = `10px`;
-       const match = id.match(/geonode:(.*?)__/);
-       const extractedWord = match ? match[1] : null;
-       bookmarkElement.title = extractedWord + " to " + Cesium.JulianDate.toIso8601(julianDate)
-        // Add click event listener to move to the specific date
-        bookmarkElement.addEventListener('click', (e) => {
-            clock.currentTime = julianDate;
-            clock.shouldAnimate = false; 
-            const layer = map.scene.imageryLayers._layers.find(l =>  e.currentTarget.id.includes(l._imageryProvider.layerId ? l._imageryProvider.layerId:l._imageryProvider._layers));
-            if (layer) {           
-                const layername = layer._imageryProvider._layers
-                const sourcecrs = Bboxlayers.get(layername).CRS;
-                const { minx, miny, maxx, maxy } = Bboxlayers.get(layername);
-                const bounds = reprojectBbox([minx, miny, maxx, maxy], sourcecrs, "EPSG:4326");
-                const rectangle = Cesium.Rectangle.fromDegrees(parseFloat(bounds[0]), parseFloat(bounds[1]), parseFloat(bounds[2]), parseFloat(bounds[3]));
-                map.camera.flyTo({destination:rectangle});   
-                map.scene.requestRender();  
-            }              
-            
-        });
-       
-       
-
-        timelineContainer.appendChild(bookmarkElement);
-        bookmarks.push({ element: bookmarkElement, julianDate: julianDate }); // Store the bookmark and its Julian date
-        i++;
-    });
-    
-    function calculateBookmarkPosition(julianDate, timeline) {
-        // Get the current visible start and end times of the timeline
-        const startTime = timeline._startJulian; // Start time in JulianDate
-        const stopTime = timeline._endJulian;   // End time in JulianDate
-        const iso8601DateStart = Cesium.JulianDate.toIso8601(startTime);
-        const iso8601DateEnd = Cesium.JulianDate.toIso8601(stopTime);
-        const iso8601DatActual = Cesium.JulianDate.toIso8601(julianDate)
-        const totalVisibleDuration = Cesium.JulianDate.secondsDifference(stopTime, startTime);
-        const timeOffset = Cesium.JulianDate.secondsDifference(julianDate, startTime);
-        console.log("start{"+iso8601DateStart+"} end {"+iso8601DateEnd+"} actual {"+iso8601DatActual+"} totalVisibleDuration{"+totalVisibleDuration+"} offset{"+timeOffset+"}");
-        // Calculate the position relative to the timeline width
-        const tickPosition = (timeOffset / totalVisibleDuration) * timelineContainer.clientWidth;
-        return tickPosition;
-    }
-
-    function updateBookmarks() {
-        //const totalDuration = Cesium.JulianDate.secondsDifference(clock.stopTime, clock.startTime);
-        // console.log('Updating bookmarks. Total Duration:', totalDuration);
-        bookmarks.forEach(bookmark => {
-            const tickPosition = calculateBookmarkPosition(bookmark.julianDate, timeline);
-            if (bookmark.element.id){
-                bookmark.element.style.left = `${tickPosition}px`;
-                //bookmark.element.offsetWidth; // Force DOM reflow
-            }
-        });
-
-        // Request a re-render of the Cesium scene (if necessary)
-        map.scene.requestRender();
-    }
-
-    wheelHandler = function (event){
-        event.preventDefault();
-        clearTimeout(debounceTimeout); // Clear previous timeout
-        debounceTimeout = setTimeout(updateBookmarks, 100); // Set new
-        //setTimeout(updateBookmarks, 500);
-    };
-    timelineContainer.addEventListener('wheel', wheelHandler);
- 
-    
-    
-}
 
 function addDropdownsToDOM(dropdownContainer ,map,julianDates,id,clock,update) {
         
@@ -712,9 +613,9 @@ function buildDropDownContainer(dropdownContainer, cesiumContainerWidth, map, id
         dropdownContainer.style.fontSize = '80%';
         dropdownContainer.className = 'cesium-baseLayerPicker-dropDown';
         // Set the width of the timeline container to 80% of the Cesium container width
-        dropdownContainer.style.width = cesiumContainerWidth * 0.20 + "px";
+        dropdownContainer.style.width = cesiumContainerWidth * 0.185 + "px";
 
-        dropdownContainer.style.height = '60px';
+        dropdownContainer.style.height = '80px';
         document.getElementsByClassName(map.cesiumWidget.container.className)[0].appendChild(dropdownContainer);
        
     }
@@ -768,6 +669,7 @@ function buildDropDownContainer(dropdownContainer, cesiumContainerWidth, map, id
         dateDropdown = document.createElement('select');
         dateDropdown.id = 'dateDropdown';
         dateDropdown.className = 'cesium-button';
+        dateDropdown.style.left="15px";
         // Create a default option for the date dropdown
         var defaultDateOption = document.createElement('option');
         // Clear existing options
@@ -784,7 +686,7 @@ function buildDropDownContainer(dropdownContainer, cesiumContainerWidth, map, id
         label.style.display = 'block';
         label.style.marginBottom = '1px';
         label.textContent = 'Time Filter';
-
+        label.style.color="White";
         dropdownContainer.appendChild(label);
         dropdownContainer.appendChild(layerDropdown);
         dropdownContainer.appendChild(dateDropdown);
@@ -814,7 +716,7 @@ function populateLayerDropdown(id, name, julianDates, clock, map) {
         layerDropdown.addEventListener('change', function (event) {
             var selectedlayer = event.target.value;
             if (selectedlayer !== '') {
-                //localStorage.setItem(selectedlayerKey, selectedlayer);
+                
                 layerDates = JSON.parse(localStorage.getItem(storageKey)) || [];
                 const existingLayer = layerDates.find(item => item.layer === selectedlayer);
                 if (!existingLayer){
@@ -850,26 +752,31 @@ function populateDateDropdown(id,dates,clock,map) {
     const uniq = [
         ...new Map(dates.map(item => [item.dayNumber + '_' + item.secondsOfDay, item])).values()
     ];
- 
-    uniq.forEach(function(date) {
-        var gregorianDate = Cesium.JulianDate.toGregorianDate(date);
-        var isoDate = Cesium.JulianDate.toIso8601(date);
+    if (uniq.length<5){
+        var prevNextContainer = document.getElementById('prevNextContainer');
+        if (prevNextContainer && prevNextContainer!== null) {
+            prevNextContainer.remove();
+        }
+        uniq.forEach(function(date) {
+            var gregorianDate = Cesium.JulianDate.toGregorianDate(date);
+            var isoDate = Cesium.JulianDate.toIso8601(date);
+            var option = document.createElement('option');
+            option.id = id+"_"+i 
+            option.value = isoDate;
+            option.text = `${gregorianDate.year}-${gregorianDate.month}-${gregorianDate.day}`;
+            option.style.fontSize = '80%';
         
-        var option = document.createElement('option');
-        option.id = id+"_"+i 
-        option.value = isoDate;
-        option.text = `${gregorianDate.year}-${gregorianDate.month}-${gregorianDate.day}`;
-        option.style.fontSize = '80%';
-       
-        dateDropdown.appendChild(option);
-        i++;
-    });
-    
+            dateDropdown.appendChild(option);
+            i++;
+        });
+    } else {
+        paginateDates(uniq,dateDropdown,5,id);
+    }
     // Date selection event
     dateDropdown.addEventListener('change', function() {
         var selectedDate = this.value;
         if (selectedDate !== '') {
-           // localStorage.setItem(selectedDateKey, selectedDate);
+          
            var layerDropdown = document.getElementById('layerDropdown');
            const existingLayer = layerDates.find(item => item.layer === layerDropdown.value);
             if (existingLayer) {
@@ -878,7 +785,6 @@ function populateDateDropdown(id,dates,clock,map) {
                 layerDates.push({ layer: id, lastDate: selectedDate });
             }
             localStorage.setItem(storageKey, JSON.stringify(layerDates));
-            //console.log('Selected Date:', selectedDate);
             clock.currentTime = Cesium.JulianDate.fromIso8601(selectedDate);
             clock.shouldAnimate = false; 
             const layername = id.split('__')[0];
@@ -919,5 +825,90 @@ function removeDropdownContainer() {
         //console.log('Dropdown container removed');
     } 
 }
+
+// Assuming you have an array of dates (dateArray) and a dropdown element (dropdown)
+function paginateDates(dateArray, dropdown, pageSize,id) {
+    const totalPages = Math.ceil(dateArray.length / pageSize);
+    let currentPage = 1;
+    const { prevButton, nextButton } = buildPrevNextContainer();
+
+    function buildPrevNextContainer() {
+        var dropdownContainer = document.getElementById('dropdownContainer');
+
+        const prevButton = document.createElement('button');
+        prevButton.style.position = 'realtive';
+
+        prevButton.className = "cesium-button";
+        prevButton.title = "Previous";
+        prevButton.style.left = "5px";
+        prevButton.textContent = "<";
+        const nextButton = document.createElement('button');
+       
+        nextButton.className = "cesium-button";
+        nextButton.title = "Next";
+        nextButton.style.left = "0px";
+        nextButton.textContent = ">";
+        const prevNextContainer = document.createElement('div');
+        prevNextContainer.id = "prevNextContainer";
+        prevNextContainer.style.position = "absolute";
+        prevNextContainer.style.left = "5px";
+        const pageNumbers = document.createElement('span');
+        pageNumbers.id="pageNumbers";
+        pageNumbers.style.margin="70px";
+        pageNumbers.style.color="white";
+        if (totalPages > 1) {
+            prevNextContainer.appendChild(prevButton);
+            prevNextContainer.appendChild(pageNumbers);
+            prevNextContainer.appendChild(nextButton);
+
+            dropdownContainer.appendChild(prevNextContainer);
+        } else {
+            prevNextContainer.remove();
+        }
+        return { prevButton, nextButton };
+    }
+
+    function updateDropdown(start, end) {
+      dropdown.innerHTML = '';
+      
+      setDefaultForDropDownDateList();
+      for (let i = start; i < end; i++) {
+         if (i< dateArray.length){
+            var gregorianDate = Cesium.JulianDate.toGregorianDate(dateArray[i]);
+            var isoDate = Cesium.JulianDate.toIso8601(dateArray[i]);
+            `${gregorianDate.year}-${gregorianDate.month}-${gregorianDate.day}`;
+            const option = document.createElement('option');
+            option.id = id+"_"+i 
+            option.value = isoDate;
+            option.text = `${gregorianDate.year}-${gregorianDate.month}-${gregorianDate.day}`;
+            option.style.fontSize = '80%';
+        
+            //option.textContent = dateArray[i];
+            dropdown.appendChild(option);
+         }
+      }
+      const pageNumbersElement = document.getElementById('pageNumbers');
+      pageNumbersElement.textContent = `Page ${currentPage} of ${totalPages}`;
+    
+    }
+  
+    // Update dropdown initially
+    updateDropdown(0, pageSize);
+  
+    // Pagination button handlers
+    prevButton.addEventListener('click', () => {
+      if (currentPage > 1) {
+        currentPage--;
+        updateDropdown((currentPage - 1) * pageSize, currentPage * pageSize);
+      }
+    });
+  
+    nextButton.addEventListener('click', () => {
+      if (currentPage < totalPages) {
+        currentPage++;
+        updateDropdown((currentPage - 1) * pageSize, currentPage * pageSize);
+      }
+    });
+  }
   
 Layers.registerType('wms', {create: createLayer, update: updateLayer});
