@@ -640,7 +640,9 @@ function buildDropDownContainer(dropdownContainer, cesiumContainerWidth, map, id
          imgbutton.draggable= false;
          imgbutton.style.filter= "invert(1)";
          imgbutton.className ="cesium-baseLayerPicker-selected";
-         imgbutton.src="/static/mapstore/img/filter.png";
+         imgbutton.style.width="110%";
+         imgbutton.style.height="110%";
+         imgbutton.src="/static/mapstore/img/clock-icon-with-research.png";
          buttonContainer.appendChild(imgbutton);
         document.getElementsByClassName(map.cesiumWidget.container.className)[0].appendChild(buttonContainer);
         
